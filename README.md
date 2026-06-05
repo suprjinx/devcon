@@ -64,6 +64,20 @@ first created. `postStart` runs every time it is (re)started. `postAttach` runs
 just before `devcon shell` opens a terminal. Create-time commands are skipped on
 subsequent `devcon up`/`shell` calls because the container already exists.
 
+### Git ownership
+
+Dev container workspaces are bind-mounted from the host, so files are owned by
+the host UID while processes inside run as a different user. Git's
+"dubious ownership" guard then refuses to operate on the repo. Before running
+lifecycle commands, devcon marks the workspace as trusted for all users:
+
+```sh
+git config --system --add safe.directory <workspaceFolder>
+```
+
+This is best-effort (run as root, ignored if git isn't installed) and matches
+what the official tooling does. Disable it with `DEVCON_NO_GIT_SAFE_DIRECTORY=1`.
+
 ## Not implemented (yet)
 
 - Dev Container **Features** (`features`) — the big one.
@@ -75,7 +89,7 @@ subsequent `devcon up`/`shell` calls because the container already exists.
 ## Try it
 
 ```sh
-devcon -w examples/dockerfile up
-devcon -w examples/dockerfile exec -- cat /tmp/devcon-created.txt
-devcon -w examples/dockerfile down
+devcon -w examples/minimal up
+devcon -w examples/minimal exec -- cat /tmp/devcon-created.txt
+devcon -w examples/minimal down
 ```

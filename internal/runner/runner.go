@@ -127,6 +127,7 @@ func localUp(dc *config.DevContainer, rebuild bool) error {
 		if err := createContainer(dc); err != nil {
 			return err
 		}
+		trustWorkspace(dc)
 		if err := runCreateHooks(dc); err != nil {
 			return err
 		}
@@ -221,6 +222,7 @@ func composeUp(dc *config.DevContainer, rebuild bool) error {
 	}
 
 	if fresh {
+		trustWorkspace(dc)
 		if err := runCreateHooks(dc); err != nil {
 			return err
 		}
@@ -245,6 +247,34 @@ func runCreateHooks(dc *config.DevContainer) error {
 		}
 	}
 	return nil
+}
+
+// trustWorkspace marks the workspace as a trusted git directory for every user
+// in the container. Dev container workspaces are bind-mounted from the host and
+// are usually owned by a different UID than the container user, which makes Git
+// refuse to operate on them ("detected dubious ownership"). The official
+// devcontainer tooling does the same before running lifecycle commands, so that
+// git-using hooks (postCreate/updateContent) work out of the box.
+//
+// Best effort: runs as root, ignores failure (e.g. git not installed), and is
+// skipped entirely if DEVCON_NO_GIT_SAFE_DIRECTORY is set.
+func trustWorkspace(dc *config.DevContainer) {
+	if os.Getenv("DEVCON_NO_GIT_SAFE_DIRECTORY") != "" {
+		return
+	}
+	git := []string{"git", "config", "--system", "--add", "safe.directory", dc.WorkspaceFolder}
+
+	var ec *exec.Cmd
+	if dc.Mode() == config.ModeCompose {
+		args := append(dc.ComposeFileArgs(), "exec", "-T", "-u", "0", dc.Service)
+		ec = docker.Compose(append(args, git...)...)
+	} else {
+		args := []string{"exec", "-u", "0", dc.ContainerName()}
+		ec = docker.Cmd(append(args, git...)...)
+	}
+	if _, err := docker.OutputCmd(ec); err == nil {
+		fmt.Fprintf(os.Stderr, "[devcon] trusting %s as a git safe.directory\n", dc.WorkspaceFolder)
+	}
 }
 
 // execCmd builds a `docker exec` / `docker compose exec` command targeting the
