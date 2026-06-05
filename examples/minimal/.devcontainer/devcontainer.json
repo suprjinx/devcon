@@ -1,0 +1,18 @@
+{
+    // A minimal Dockerfile-based dev container for trying out devcon.
+    "name": "devcon-example",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": ".."
+    },
+    "workspaceFolder": "/workspaces/example",
+    "remoteUser": "dev",
+    "containerEnv": {
+        "GREETING": "hello from ${localWorkspaceFolderBasename}"
+    },
+    "forwardPorts": [
+        7654
+    ],
+    // trailing comma + comment below on purpose, to exercise the JSONC parser
+    "postCreateCommand": "echo \"$GREETING\" > /tmp/devcon-created.txt",
+}
