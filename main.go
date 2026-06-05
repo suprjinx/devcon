@@ -10,6 +10,9 @@ import (
 	"devcon/internal/runner"
 )
 
+// version is overridden at build time via -ldflags "-X main.version=...".
+var version = "dev"
+
 const usage = `devcon - run .devcontainer environments without Node/npm
 
 usage: devcon [global flags] <command> [args]
@@ -27,6 +30,7 @@ global flags:
   -w, --workspace DIR   project directory (default: current directory)
   -c, --config FILE     path to a devcontainer.json (overrides discovery)
   -h, --help            show this help
+  -v, --version         print version and exit
 
 environment:
   DEVCON_SHELL          shell to open for "shell" (default: bash, else sh)
@@ -61,6 +65,9 @@ flags:
 		case "-h", "--help", "help":
 			fmt.Print(usage)
 			return nil
+		case "-v", "--version":
+			fmt.Println(version)
+			return nil
 		default:
 			if strings.HasPrefix(args[i], "-") {
 				return fmt.Errorf("unknown flag %q (try --help)", args[i])
@@ -74,6 +81,12 @@ flags:
 	cmd := "shell"
 	if len(rest) > 0 {
 		cmd, rest = rest[0], rest[1:]
+	}
+
+	// Commands that don't need a resolved devcontainer.json.
+	if cmd == "version" {
+		fmt.Println(version)
+		return nil
 	}
 
 	root, err := resolveRoot(workspace)

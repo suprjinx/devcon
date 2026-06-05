@@ -1,0 +1,131 @@
+name: nightly
+
+# Build cross-platform binaries every night and publish them to a rolling
+# "nightly" pre-release. Also runnable on demand from the Actions tab.
+on:
+  schedule:
+    - cron: "0 6 * * *" # 06:00 UTC daily
+  workflow_dispatch: {}
+
+# Don't let two nightly runs overlap on the rolling release.
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+permissions:
+  contents: write # needed to create/replace the release
+
+jobs:
+  # Skip scheduled runs when nothing was committed since the last nightly.
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.decide.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: decide
+        run: |
+          build=true
+          if [ "${{ github.event_name }}" = "schedule" ] \
+             && [ -z "$(git log --since='25 hours ago' --pretty=oneline)" ]; then
+            build=false
+            echo "No commits in the last 25h; skipping nightly."
+          fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: guard
+    if: needs.guard.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - run: go vet ./...
+      - run: go test ./...
+
+  build:
+    needs: [guard, test]
+    if: needs.guard.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
+    env:
+      CGO_ENABLED: "0"
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Compute version
+        run: echo "VERSION=nightly-$(date -u +%Y%m%d)-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: |
+          bin=devcon
+          [ "$GOOS" = windows ] && bin=devcon.exe
+          mkdir -p build dist
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${VERSION}" \
+            -o "build/$bin" .
+
+      - name: Package
+        run: |
+          name="devcon_${VERSION}_${GOOS}_${GOARCH}"
+          if [ "$GOOS" = windows ]; then
+            (cd build && zip -q "../dist/${name}.zip" devcon.exe)
+          else
+            tar -C build -czf "dist/${name}.tar.gz" devcon
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: devcon_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: dist/*
+          retention-days: 7
+
+  release:
+    needs: [guard, build]
+    if: needs.guard.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS
+
+      - name: Publish rolling nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Move the rolling "nightly" tag/release to this commit and replace
+          # its assets.
+          gh release delete nightly --yes --cleanup-tag \
+            --repo "$GITHUB_REPOSITORY" || true
+          gh release create nightly dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "Nightly $(date -u +%Y-%m-%d)" \
+            --notes "Automated nightly build from \`${GITHUB_SHA}\`."
