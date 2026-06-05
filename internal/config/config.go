@@ -271,6 +271,99 @@ func (dc *DevContainer) ForwardPortArgs() []string {
 	return out
 }
 
+// ---- image metadata (the devcontainer.metadata label) ----------------------
+
+// ImageMetadata is the subset of the image's devcontainer.metadata label that
+// devcon merges into the config. Base images and Features embed this label so
+// that downstream tools (VS Code, the official CLI, and now devcon) know things
+// like which user to attach as.
+type ImageMetadata struct {
+	RemoteUser    string
+	ContainerUser string
+	ContainerEnv  map[string]string
+	RemoteEnv     map[string]string
+}
+
+type metaFragment struct {
+	RemoteUser    string            `json:"remoteUser"`
+	ContainerUser string            `json:"containerUser"`
+	ContainerEnv  map[string]string `json:"containerEnv"`
+	RemoteEnv     map[string]string `json:"remoteEnv"`
+}
+
+// ParseImageMetadata parses the devcontainer.metadata label, which is a JSON
+// array of config fragments (or, defensively, a single object), and merges them
+// in order: scalars are last-wins, maps accumulate with later keys winning.
+func ParseImageMetadata(label []byte) (ImageMetadata, error) {
+	var out ImageMetadata
+	b := bytes.TrimSpace(label)
+	if len(b) == 0 || string(b) == "null" {
+		return out, nil
+	}
+	var frags []metaFragment
+	if b[0] == '[' {
+		if err := json.Unmarshal(b, &frags); err != nil {
+			return out, err
+		}
+	} else {
+		var one metaFragment
+		if err := json.Unmarshal(b, &one); err != nil {
+			return out, err
+		}
+		frags = []metaFragment{one}
+	}
+	for _, f := range frags {
+		if f.RemoteUser != "" {
+			out.RemoteUser = f.RemoteUser
+		}
+		if f.ContainerUser != "" {
+			out.ContainerUser = f.ContainerUser
+		}
+		for k, v := range f.ContainerEnv {
+			if out.ContainerEnv == nil {
+				out.ContainerEnv = map[string]string{}
+			}
+			out.ContainerEnv[k] = v
+		}
+		for k, v := range f.RemoteEnv {
+			if out.RemoteEnv == nil {
+				out.RemoteEnv = map[string]string{}
+			}
+			out.RemoteEnv[k] = v
+		}
+	}
+	return out, nil
+}
+
+// ApplyImageMetadata fills user/env from image metadata for any field the
+// devcontainer.json did not set explicitly. devcontainer.json always wins; for
+// env, json entries override metadata per-key.
+func (dc *DevContainer) ApplyImageMetadata(m ImageMetadata) {
+	if dc.RemoteUser == "" {
+		dc.RemoteUser = m.RemoteUser
+	}
+	if dc.ContainerUser == "" {
+		dc.ContainerUser = m.ContainerUser
+	}
+	dc.ContainerEnv = mergeEnv(m.ContainerEnv, dc.ContainerEnv)
+	dc.RemoteEnv = mergeEnv(m.RemoteEnv, dc.RemoteEnv)
+}
+
+// mergeEnv layers override on top of base, returning nil if both are empty.
+func mergeEnv(base, override map[string]string) map[string]string {
+	if len(base) == 0 {
+		return override
+	}
+	merged := make(map[string]string, len(base)+len(override))
+	for k, v := range base {
+		merged[k] = v
+	}
+	for k, v := range override {
+		merged[k] = v
+	}
+	return merged
+}
+
 // ---- custom JSON shapes ----------------------------------------------------
 
 // stringSlice accepts either a JSON string or array of strings.

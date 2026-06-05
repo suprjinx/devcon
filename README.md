@@ -64,6 +64,21 @@ first created. `postStart` runs every time it is (re)started. `postAttach` runs
 just before `devcon shell` opens a terminal. Create-time commands are skipped on
 subsequent `devcon up`/`shell` calls because the container already exists.
 
+### Which user you get
+
+devcon resolves the container user the same way VS Code does, in precedence order:
+
+1. `remoteUser` / `containerUser` in devcontainer.json
+2. the image's `devcontainer.metadata` label (how Microsoft/Features base images
+   advertise `remoteUser: vscode`)
+3. the image's `USER` directive
+4. root
+
+So an image built `FROM mcr.microsoft.com/devcontainers/...` drops you in as
+`vscode` automatically, with no `remoteUser` needed in the json — and because
+that user's UID usually matches your host UID, bind-mounted files are owned
+correctly. (Compose services are skipped here; set `remoteUser` explicitly.)
+
 ### Git ownership
 
 Dev container workspaces are bind-mounted from the host, so files are owned by

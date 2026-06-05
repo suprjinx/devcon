@@ -114,15 +114,23 @@ func localUp(dc *config.DevContainer, rebuild bool) error {
 		state = ""
 	}
 
+	// Make sure the image exists locally before we create the container or try
+	// to read its metadata.
+	if state == "" {
+		if err := ensureImage(dc, rebuild); err != nil {
+			return err
+		}
+	}
+
+	// Pick up remoteUser/containerUser (e.g. "vscode") and env from the image's
+	// devcontainer.metadata label for anything the json didn't set. This must
+	// happen before createContainer (containerUser) and exec (remoteUser).
+	resolveImageMetadata(dc)
+
 	switch state {
 	case "running":
 		return nil
 	case "":
-		if dc.Mode() == config.ModeBuild && (rebuild || !docker.ImageExists(dc.ImageTag())) {
-			if err := buildImage(dc, rebuild); err != nil {
-				return err
-			}
-		}
 		fmt.Fprintf(os.Stderr, "[devcon] creating %s\n", name)
 		if err := createContainer(dc); err != nil {
 			return err
@@ -131,13 +139,61 @@ func localUp(dc *config.DevContainer, rebuild bool) error {
 		if err := runCreateHooks(dc); err != nil {
 			return err
 		}
-	default: // exited, created, paused, ...
+	default: // exited, paused, ...
 		fmt.Fprintf(os.Stderr, "[devcon] starting %s\n", name)
 		if err := docker.Run("start", name); err != nil {
 			return err
 		}
 	}
 	return runLifecycle(dc, dc.PostStartCommand, "postStart")
+}
+
+// ensureImage makes the target image available locally (building or pulling).
+func ensureImage(dc *config.DevContainer, rebuild bool) error {
+	switch dc.Mode() {
+	case config.ModeBuild:
+		if rebuild || !docker.ImageExists(dc.ImageTag()) {
+			return buildImage(dc, rebuild)
+		}
+	case config.ModeImage:
+		if !docker.ImageExists(dc.Image) {
+			fmt.Fprintf(os.Stderr, "[devcon] pulling %s\n", dc.Image)
+			return docker.Run("pull", dc.Image)
+		}
+	}
+	return nil
+}
+
+// resolveImageMetadata reads the image's devcontainer.metadata label and merges
+// remoteUser/containerUser/env into dc for anything the json left unset. This is
+// how the conventional "vscode" user gets picked up from base images, matching
+// VS Code. Compose services are skipped (their image isn't ours to resolve).
+func resolveImageMetadata(dc *config.DevContainer) {
+	var image string
+	switch dc.Mode() {
+	case config.ModeImage:
+		image = dc.Image
+	case config.ModeBuild:
+		image = dc.ImageTag()
+	default:
+		return
+	}
+	if image == "" {
+		return
+	}
+	label, err := docker.Output("inspect", "-f",
+		`{{ index .Config.Labels "devcontainer.metadata" }}`, image)
+	if err != nil || label == "" || label == "<no value>" {
+		return
+	}
+	meta, err := config.ParseImageMetadata([]byte(label))
+	if err != nil {
+		return
+	}
+	if dc.RemoteUser == "" && meta.RemoteUser != "" {
+		fmt.Fprintf(os.Stderr, "[devcon] using remoteUser %q from image metadata\n", meta.RemoteUser)
+	}
+	dc.ApplyImageMetadata(meta)
 }
 
 func buildImage(dc *config.DevContainer, noCache bool) error {
