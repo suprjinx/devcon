@@ -20,27 +20,30 @@ internal/runner/runner.go     -> Up/Shell/Exec/Down/Rebuild/Status/PrintConfig
 - `docker` knows nothing about devcontainer.json; callers pass formed args.
 - `go build/vet/test ./...` green; end-to-end example re-verified.
 
-## 2. Dogfood: give devcon its own dev container
+## 2. Dogfood: give devcon its own dev container ✅ done
 
-Add a `.devcontainer/` to this repo so devcon can develop itself.
+`.devcontainer/devcontainer.json` (scaffolded with `devcon init`, then tweaked):
 
-- Go toolchain image (match `go.mod`, currently Go 1.23+).
-- Mount the module cache for fast rebuilds.
-- `postCreateCommand` to run `go build ./...` / `go test ./...` as a smoke test.
-- Verify with `devcon up && devcon exec -- go test ./...`.
+- Go image `mcr.microsoft.com/devcontainers/go:1` (floats latest 1.x).
+- Persistent module-cache volume mounted at `/go/pkg/mod`.
+- `postCreateCommand: go version && go build ./... && go test ./...` smoke test.
+- Verified: `devcon up` pulls the image, attaches as `vscode` (from metadata),
+  and the smoke test builds + passes all tests inside the container.
 
-## 3. Implement "Add Dev Container Configuration Files" (`devcon init`)
+## 3. Implement "Add Dev Container Configuration Files" (`devcon init`) ✅ done
 
-Fill the gap the official CLI leaves: a scaffolder. The upstream interactive
-"Dev Containers: Add Dev Container Configuration Files…" lives in the VS Code
-extension, not the CLI — `devcon init` should provide a terminal-native version.
+Non-interactive scaffolder in `internal/scaffold`. Built-in templates rendered
+programmatically (no `embed.FS` needed) using the canonical
+`mcr.microsoft.com/devcontainers/*` images — which advertise the `vscode` user
+via metadata, so generated configs "just work" with the user-resolution above.
 
-- Detect project type from marker files: `go.mod`, `package.json`, `Gemfile`,
-  `pyproject.toml`/`requirements.txt`, `Cargo.toml`, `pom.xml`/`build.gradle`.
-- Write a sensible starter `.devcontainer/devcontainer.json` (+ `Dockerfile`
-  when appropriate) for the detected stack.
-- Refuse to clobber an existing `.devcontainer/` unless `--force`.
-- Keep it zero-dependency: no OCI registry / Templates plumbing for v1; ship a
-  few built-in templates embedded in the binary (`embed.FS`).
-- Optional later: `--template-id` to apply a published Template, matching the
-  upstream `devcontainer templates apply` primitive.
+- `devcon init [LANG]` — auto-detects from marker files (`go.mod`, `Cargo.toml`,
+  `package.json`, `pyproject.toml`/`requirements.txt`, `Gemfile`, `pom.xml`,
+  `*.csproj`, `tsconfig.json`, `CMakeLists.txt`); falls back to ubuntu `base`.
+- Flags: `--list`, `--version <tag>`, `--name`, `--dockerfile` (vs `image`),
+  `--force` (refuses to clobber otherwise).
+- Templates: go, rust, python, node, typescript, java, dotnet, ruby, cpp, base.
+
+### Possible follow-ups
+- `--template-id` to apply a published OCI Template (`devcontainer templates apply`).
+- Read remoteEnv from metadata into the opened shell; compose-image metadata.

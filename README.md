@@ -22,7 +22,17 @@ Requires Docker (with the Compose v2 plugin for compose-based configs).
 
 ## Usage
 
-Run from anywhere inside your project (it discovers `.devcontainer/`):
+Scaffold a config for a project that doesn't have one (non-interactive — the
+terminal-native counterpart of VS Code's "Add Dev Container Configuration Files"):
+
+```sh
+devcon init                 # auto-detect the stack from project files
+devcon init go              # or pick one explicitly
+devcon init python --version 3.11 --dockerfile
+devcon init --list          # show available templates
+```
+
+Then run from anywhere inside your project (it discovers `.devcontainer/`):
 
 ```sh
 devcon            # start the container if needed and open a shell  (default)

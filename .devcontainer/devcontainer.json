@@ -1,0 +1,15 @@
+// devcontainer.json for developing devcon itself (dogfood).
+// Bootstrapped with `devcon init`, then customized: a persistent Go module
+// cache and a build/test smoke check on create.
+// Reference: https://containers.dev/implementors/json_reference/
+{
+  "name": "devcon",
+  "image": "mcr.microsoft.com/devcontainers/go:1",
+  // Persist the module cache across container rebuilds for fast `go build`.
+  "mounts": [
+    "source=devcon-go-mod,target=/go/pkg/mod,type=volume"
+  ],
+  // Smoke test: confirm the in-container toolchain can build and test devcon.
+  "postCreateCommand": "go version && go build ./... && go test ./..."
+  // "remoteUser": "vscode" is provided automatically via the image metadata.
+}

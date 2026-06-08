@@ -8,6 +8,7 @@ import (
 
 	"devcon/internal/config"
 	"devcon/internal/runner"
+	"devcon/internal/scaffold"
 )
 
 // version is overridden at build time via -ldflags "-X main.version=...".
@@ -18,6 +19,7 @@ const usage = `devcon - run .devcontainer environments without Node/npm
 usage: devcon [global flags] <command> [args]
 
 commands:
+  init [LANG]   scaffold a .devcontainer (auto-detects; --list, --dockerfile, --version, --name, --force)
   up            build/create and start the dev container
   shell         start it (if needed) and open an interactive shell   [default]
   exec -- CMD   run a command inside the container
@@ -93,6 +95,12 @@ flags:
 	if err != nil {
 		return err
 	}
+
+	// init scaffolds a new .devcontainer, so it runs before config loading.
+	if cmd == "init" {
+		return scaffold.Init(root, rest)
+	}
+
 	if configPath != "" {
 		if configPath, err = filepath.Abs(configPath); err != nil {
 			return err
